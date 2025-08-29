@@ -1,0 +1,17 @@
+[Unit]
+Description=Test_Bot_n8n Telegram Bot (Python)
+After=network.target
+
+[Service]
+Type=simple
+User=adminvm
+WorkingDirectory=/home/adminvm/Test_Bot_n8n
+EnvironmentFile=/home/adminvm/Test_Bot_n8n/.env
+ExecStart=/home/adminvm/Test_Bot_n8n/.venv/bin/python -m src.bot.app
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/adminvm/Test_Bot_n8n/logs/bot.out.log
+StandardError=append:/home/adminvm/Test_Bot_n8n/logs/bot.err.log
+
+[Install]
+WantedBy=multi-user.target
