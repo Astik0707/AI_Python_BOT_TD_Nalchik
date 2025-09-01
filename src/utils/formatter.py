@@ -75,7 +75,15 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
     if not rows:
         return "<b>Нет данных по заданным условиям.</b>"
 
-    title = existing_title if (existing_title and existing_title.strip().startswith("<b>") and existing_title.strip().endswith("</b>")) else "<b>Результаты запроса</b>"
+    title = (
+        existing_title
+        if (
+            existing_title
+            and existing_title.strip().startswith("<b>")
+            and existing_title.strip().endswith("</b>")
+        )
+        else "<b>Результаты запроса</b>"
+    )
 
     name_key, value_key = detect_primary_fields(rows[0])
     unit = unit_for_key(value_key.lower() if value_key else None)
@@ -102,5 +110,6 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
         lines.append(line)
 
     return title + "\n\n" + ("\n".join(lines) if lines else "")
+
 
 

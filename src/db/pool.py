@@ -40,18 +40,42 @@ async def close_pool():
 
 async def fetch_one(query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
     """Выполнить запрос и вернуть одну строку"""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(query, *params)
-        return dict(row) if row else None
+    from src.utils.logger import get_logger
+    logger = get_logger("db.pool")
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, *params)
+                return dict(row) if row else None
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt + 1}/{max_retries} для fetch_one: {e}")
+            if attempt == max_retries - 1:
+                logger.error(f"❌ Все попытки fetch_one исчерпаны: {e}")
+                raise
+            await asyncio.sleep(0.1 * (attempt + 1))  # Экспоненциальная задержка
 
 
 async def fetch_all(query: str, params: tuple = ()) -> list[Dict[str, Any]]:
     """Выполнить запрос и вернуть все строки"""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-        return [dict(row) for row in rows]
+    from src.utils.logger import get_logger
+    logger = get_logger("db.pool")
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *params)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.warning(f"⚠️ Попытка {attempt + 1}/{max_retries} для fetch_all: {e}")
+            if attempt == max_retries - 1:
+                logger.error(f"❌ Все попытки fetch_all исчерпаны: {e}")
+                raise
+            await asyncio.sleep(0.1 * (attempt + 1))  # Экспоненциальная задержка
 
 
 async def execute_returning(query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:

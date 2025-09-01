@@ -59,6 +59,7 @@ def guard_sql(sql: str) -> str:
     Enforce safety and business filters for incoming SQL:
     - Allow only single SELECT statements
     - For tables profit, orders, debt, managers_plan add filter to exclude clients with marker='Бонус'
+    - Support CTEs (WITH)
     """
     if not sql or not sql.strip():
         raise ValueError("Empty SQL query")
@@ -99,7 +100,7 @@ def guard_sql(sql: str) -> str:
             "(SELECT * FROM public.stock WHERE product_code IN ("
             "SELECT pr.product_code FROM public.products pr "
             "LEFT JOIN public.clients c ON pr.client_code = c.client_code "
-            "WHERE c.client_code IS NULL OR c.marker <> 'Бонус'" 
+            "WHERE c.client_code IS NULL OR c.marker <> 'Бонус'"
             "))"
         )
 
