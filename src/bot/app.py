@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
@@ -12,6 +13,7 @@ from telegram.ext import (
 from src.utils.html_sanitize import sanitize_html
 from src.handlers.router import handle_text_message, handle_voice_message
 from src.handlers.inline_handlers import handle_card_callback
+from src.handlers.training_feedback import handle_training_feedback, handle_comment_form
 from src.utils.logger import setup_logging, get_logger
 from src.db.pool import close_pool
 from src.utils.debug import set_debug, is_debug
@@ -94,7 +96,7 @@ async def refresh_refs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                  f"• Категории: {stats['categories_count']}\n"
                  f"• Каналы: {stats['channels_count']}\n"
                  f"• Регионы: {stats['regions_count']}\n"
-                 f"• Последнее обновление: {stats['last_update']}"
+                 f"• Последнее обновление: {datetime.fromtimestamp(stats['last_update']).strftime('%d.%m.%Y %H:%M:%S') if stats['last_update'] else 'Неизвестно'}"
         )
     except Exception as e:
         await context.bot.send_message(
@@ -129,7 +131,7 @@ async def refs_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                  f"• Категории: {stats['categories_count']}\n"
                  f"• Каналы: {stats['channels_count']}\n"
                  f"• Регионы: {stats['regions_count']}\n"
-                 f"• Последнее обновление: {stats['last_update']}\n"
+                 f"• Последнее обновление: {datetime.fromtimestamp(stats['last_update']).strftime('%d.%m.%Y %H:%M:%S') if stats['last_update'] else 'Неизвестно'}\n"
                  f"• Кэш истёк: {'Да' if stats['cache_expired'] else 'Нет'}"
         )
     except Exception as e:
@@ -159,6 +161,8 @@ def main() -> None:
         app.add_handler(CommandHandler("refs_stats", refs_stats))
         app.add_handler(CommandHandler("cards", show_cards_command))
         app.add_handler(CallbackQueryHandler(handle_card_callback, pattern="^card_"))
+        app.add_handler(CallbackQueryHandler(handle_training_feedback, pattern="^training_"))
+        app.add_handler(CallbackQueryHandler(handle_comment_form, pattern="^comment_"))
         app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 

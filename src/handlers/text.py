@@ -40,6 +40,12 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         await tg_debug(context, chat_id, f"<code>recv:</code> {sanitize_html(text)}")
 
+        # Проверяем, не ждет ли пользователь ввода комментария для обучения
+        from src.handlers.training_feedback import is_waiting_for_comment, handle_comment_text
+        if is_waiting_for_comment(chat_id):
+            await handle_comment_text(update, context)
+            return
+
         # Сброс контекста по ключевой фразе
         if "новый запрос" in text.lower():
             await clear_history(chat_id)
@@ -180,7 +186,7 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
                     text="🚀 Отправить на обучение", 
-                    callback_data=f"train:{log_id}"
+                    callback_data=f"training_{log_id}"
                 )
             ]])
             
@@ -201,7 +207,7 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
                     text="🚀 Отправить на обучение", 
-                    callback_data=f"train:{log_id}"
+                    callback_data=f"training_{log_id}"
                 )
             ]])
             
