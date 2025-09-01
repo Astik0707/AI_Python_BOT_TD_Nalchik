@@ -53,8 +53,16 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             return
 
+
+
         # 1) Проверка авторизации
-        if not await check_authorized_chat(chat_id):
+        logger.info(f"🔐 Начинаю проверку авторизации для chat_id: {chat_id}")
+        
+        is_authorized = await check_authorized_chat(chat_id)
+        logger.info(f"🔐 Результат check_authorized_chat({chat_id}): {is_authorized}")
+        
+        if not is_authorized:
+            logger.warning(f"⛔ ОТКАЗ В ДОСТУПЕ для chat_id: {chat_id}")
             await context.bot.send_message(
                 chat_id=chat_id, 
                 text="❌ У вас нет доступа к этому боту"
@@ -62,7 +70,19 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await tg_debug(context, chat_id, "⛔ Неавторизованный чат")
             return
 
+        logger.info(f"✅ Авторизация пройдена для chat_id: {chat_id}")
         await tg_debug(context, chat_id, "✅ Авторизация пройдена")
+
+        # Мгновенное сообщение-уведомление пользователю
+        ack_msg_id: Optional[int] = None
+        try:
+            ack = await context.bot.send_message(
+                chat_id=chat_id,
+                text="⌛ Ваш запрос принят в работу. Ожидайте"
+            )
+            ack_msg_id = ack.message_id
+        except Exception:
+            pass
 
         # Записываем пользовательское сообщение в память
         try:
@@ -116,16 +136,36 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # 5) Обработка специальных действий
         # Гейтинг по ТЗ: график/Excel только по явной просьбе в тексте запроса
         chart_intent = bool(re.search(r"график|диаграмм|линейн|столбчат|кругов|pie|bar|line|doughnut", text.lower()))
-        excel_intent = bool(re.search(r"\bexcel\b|эксель|таблиц|в\s+excel|в\s+эксель", text.lower()))
+        excel_intent = bool(re.search(r"\bexcel\b|эксель|таблиц|в\s+excel|в\s+эксель|отправ|почт|email|емейл", text.lower()))
 
-        if result.send_excel and excel_intent:
+        if result.send_excel:
             await tg_debug(context, chat_id, "📧 Отправка Excel...")
-            await handle_excel_request(context, chat_id, result)
+            # Если указан получатель — отправляем на почту, иначе в чат
+            if result.recipient:
+                await handle_excel_request(context, chat_id, result)
+            else:
+                from src.handlers.excel_flow import send_excel_in_chat
+                if result.table_data:
+                    await send_excel_in_chat(context, chat_id, result.table_data)
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text="❌ Нет данных для Excel")
+            # Удаляем уведомление после отправки
+            try:
+                if ack_msg_id:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+            except Exception:
+                pass
             return
 
         if result.send_card:
             await tg_debug(context, chat_id, f"🗂️ Отправка карточки: {result.rep_name}")
             await handle_card_request(context, chat_id, result)
+            # Удаляем уведомление после отправки
+            try:
+                if ack_msg_id:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+            except Exception:
+                pass
             return
 
         # 6) Отправка ответа или графика
@@ -150,6 +190,12 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 photo=chart_png,
                 reply_markup=keyboard
             )
+            # Удаляем уведомление после отправки
+            try:
+                if ack_msg_id:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+            except Exception:
+                pass
         else:
             # Обычный текстовый ответ с кнопкой обучения
             keyboard = InlineKeyboardMarkup([[
@@ -165,11 +211,23 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 parse_mode=ParseMode.HTML, 
                 reply_markup=keyboard
             )
+            # Удаляем уведомление после отправки
+            try:
+                if ack_msg_id:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+            except Exception:
+                pass
         await tg_debug(context, chat_id, "✅ Ответ отправлен")
 
     except Exception as e:
         logger.error(f"Error processing text message: {e}", exc_info=True)
         await tg_debug(context, chat_id, f"❌ Ошибка обработки: {e}")
+        # Удаляем уведомление при ошибке
+        try:
+            if 'ack_msg_id' in locals() and ack_msg_id:
+                await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+        except Exception:
+            pass
         await context.bot.send_message(
             chat_id=chat_id, 
             text="❌ Произошла ошибка при обработке сообщения"
@@ -182,14 +240,14 @@ async def handle_excel_request(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         from src.handlers.excel_flow import send_excel_via_email
         
         recipient = result.recipient or 'default@example.com'
-        subject = result.subject or 'Excel Report'
-        body = result.body or ''
+        subject = result.subject or 'Отчет по запросу'
+        body = result.body or 'Во вложении отчет по вашему запросу'
         
         if result.table_data:
             await send_excel_via_email(recipient, subject, body, result.table_data)
             await context.bot.send_message(
                 chat_id=chat_id, 
-                text="✅ Excel отправлен на почту"
+                text=f"✅ Excel отправлен на почту: {recipient}"
             )
         else:
             await context.bot.send_message(
@@ -198,9 +256,21 @@ async def handle_excel_request(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
             )
     except Exception as e:
         logger.error(f"Error sending Excel: {e}")
+        
+        # Определяем тип ошибки и даем понятное сообщение
+        error_msg = str(e)
+        if "Application-specific password required" in error_msg:
+            user_msg = "❌ Ошибка отправки Excel: Требуется настройка SMTP пароля приложения Google.\n\nСм. файл EMAIL_SETUP.md для инструкций."
+        elif "SMTP credentials not configured" in error_msg:
+            user_msg = "❌ Ошибка отправки Excel: Не настроены SMTP параметры в .env файле.\n\nДобавьте SMTP_USER и SMTP_PASSWORD в .env"
+        elif "authentication failed" in error_msg.lower():
+            user_msg = "❌ Ошибка отправки Excel: Неверные SMTP учетные данные.\n\nПроверьте SMTP_USER и SMTP_PASSWORD в .env"
+        else:
+            user_msg = f"❌ Ошибка отправки Excel: {e}"
+        
         await context.bot.send_message(
             chat_id=chat_id, 
-            text="❌ Ошибка отправки Excel"
+            text=user_msg
         )
 
 
