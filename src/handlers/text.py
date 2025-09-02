@@ -105,7 +105,7 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             user_name=user.full_name if user else None, 
             text=text
         )
-        await tg_debug(context, chat_id, f"✅ AI ответ получен. send_excel={result.send_excel}, send_card={result.send_card}, chart={bool(result.chart)}")
+        await tg_debug(context, chat_id, f"✅ AI ответ получен. send_excel={result.send_excel}, send_card={result.send_card}")
 
         # Если включён debug — показываем SQL и первые строки
         try:
@@ -140,8 +140,6 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pass
 
         # 5) Обработка специальных действий
-        # Гейтинг по ТЗ: график/Excel только по явной просьбе в тексте запроса
-        chart_intent = bool(re.search(r"график|диаграмм|линейн|столбчат|кругов|pie|bar|line|doughnut", text.lower()))
         excel_intent = bool(re.search(r"\bexcel\b|эксель|таблиц|в\s+excel|в\s+эксель|отправ|почт|email|емейл", text.lower()))
 
         if result.send_excel:
@@ -174,55 +172,26 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 pass
             return
 
-        # 6) Отправка ответа или графика
-        if result.direct_chart and result.chart:
-            await tg_debug(context, chat_id, "📊 Генерация графика...")
-            
-            # Генерируем график
-            from src.services.charts.service import render_chart_to_png
-            chart_png = render_chart_to_png(result.chart)
-            
-            # Кнопка обучения
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    text="🚀 Отправить на обучение", 
-                    callback_data=f"training_{log_id}"
-                )
-            ]])
-            
-            # Отправляем график с кнопкой обучения
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=chart_png,
-                reply_markup=keyboard
+        # 6) Отправка текстового ответа
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                text="🚀 Отправить на обучение", 
+                callback_data=f"training_{log_id}"
             )
-            # Удаляем уведомление после отправки
-            try:
-                if ack_msg_id:
-                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
-            except Exception:
-                pass
-        else:
-            # Обычный текстовый ответ с кнопкой обучения
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    text="🚀 Отправить на обучение", 
-                    callback_data=f"training_{log_id}"
-                )
-            ]])
-            
-            await context.bot.send_message(
-                chat_id=chat_id, 
-                text=html, 
-                parse_mode=ParseMode.HTML, 
-                reply_markup=keyboard
-            )
-            # Удаляем уведомление после отправки
-            try:
-                if ack_msg_id:
-                    await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
-            except Exception:
-                pass
+        ]])
+
+        await context.bot.send_message(
+            chat_id=chat_id, 
+            text=html, 
+            parse_mode=ParseMode.HTML, 
+            reply_markup=keyboard
+        )
+        # Удаляем уведомление после отправки
+        try:
+            if ack_msg_id:
+                await context.bot.delete_message(chat_id=chat_id, message_id=ack_msg_id)
+        except Exception:
+            pass
         await tg_debug(context, chat_id, "✅ Ответ отправлен")
 
     except Exception as e:
@@ -337,19 +306,4 @@ async def handle_card_request(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
         )
 
 
-async def handle_chart_request(context: ContextTypes.DEFAULT_TYPE, chat_id: int, result) -> None:
-    """Обработка запроса на отправку графика"""
-    try:
-        from src.services.charts.service import render_chart_to_png
-        
-        # Логируем конфигурацию графика для отладки
-        logger.info(f"📊 CHART CONFIG: {result.chart}")
-        
-        chart_png = render_chart_to_png(result.chart)
-        await context.bot.send_photo(chat_id=chat_id, photo=chart_png)
-    except Exception as e:
-        logger.error(f"Error generating chart: {e}")
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text="❌ Ошибка генерации графика"
-        )
+# Обработка графиков отключена

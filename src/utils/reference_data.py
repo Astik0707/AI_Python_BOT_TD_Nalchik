@@ -14,6 +14,8 @@ _REFERENCE_CACHE = {
     "categories": {},
     "channels": {},
     "regions": {},
+    "clients": {},
+    "managers": {},
     "last_update": None
 }
 
@@ -61,6 +63,24 @@ async def load_references_from_db():
         """
         regions_result = await fetch_all(regions_query)
         
+        # Загружаем клиентов (публичные/юридические названия)
+        clients_query = """
+        SELECT DISTINCT LOWER(COALESCE(NULLIF(public_name,''), client_name)) AS client_name
+        FROM clients
+        WHERE COALESCE(NULLIF(public_name,''), client_name) IS NOT NULL
+        ORDER BY client_name
+        """
+        clients_result = await fetch_all(clients_query)
+
+        # Загружаем менеджеров
+        managers_query = """
+        SELECT DISTINCT LOWER(full_name) AS manager_name
+        FROM sales_representatives
+        WHERE full_name IS NOT NULL AND full_name != ''
+        ORDER BY manager_name
+        """
+        managers_result = await fetch_all(managers_query)
+        
         # Обновляем кэш
         _REFERENCE_CACHE["brands"] = {
             row["brand_name"]: "brand" for row in brands_result
@@ -81,12 +101,24 @@ async def load_references_from_db():
             row["region_name"]: "region" for row in regions_result
         }
         
+        _REFERENCE_CACHE["clients"] = {
+            row["client_name"]: "client" for row in clients_result
+        }
+        
+        _REFERENCE_CACHE["managers"] = {
+            row["manager_name"]: "manager" for row in managers_result
+        }
+        
         _REFERENCE_CACHE["last_update"] = time.time()
         
-        logger.info(f"✅ Справочники обновлены: {len(_REFERENCE_CACHE['brands'])} брендов, "
-                   f"{len(_REFERENCE_CACHE['categories'])} категорий, "
-                   f"{len(_REFERENCE_CACHE['channels'])} каналов, "
-                   f"{len(_REFERENCE_CACHE['regions'])} регионов")
+        logger.info(
+            f"✅ Справочники обновлены: {len(_REFERENCE_CACHE['brands'])} брендов, "
+            f"{len(_REFERENCE_CACHE['categories'])} категорий, "
+            f"{len(_REFERENCE_CACHE['channels'])} каналов, "
+            f"{len(_REFERENCE_CACHE['regions'])} регионов, "
+            f"{len(_REFERENCE_CACHE['clients'])} клиентов, "
+            f"{len(_REFERENCE_CACHE['managers'])} менеджеров"
+        )
         
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки справочников из БД: {e}")
@@ -134,52 +166,79 @@ def get_references_stats():
         "categories_count": len(_REFERENCE_CACHE["categories"]),
         "channels_count": len(_REFERENCE_CACHE["channels"]),
         "regions_count": len(_REFERENCE_CACHE["regions"]),
+        "clients_count": len(_REFERENCE_CACHE["clients"]),
+        "managers_count": len(_REFERENCE_CACHE["managers"]),
         "last_update": _REFERENCE_CACHE["last_update"],
         "cache_expired": _is_cache_expired()
     }
 
+def _norm(s: str) -> str:
+    return (s or "").lower().replace("ё", "е")
+
+
+def _has_word(text: str, phrase: str) -> bool:
+    if not phrase:
+        return False
+    try:
+        pattern = r"\b" + re.escape(phrase) + r"\b"
+        return re.search(pattern, text, flags=re.IGNORECASE) is not None
+    except re.error:
+        return phrase in text
+
+
 async def extract_entities(text: str) -> Dict[str, List[str]]:
     """
     Извлекает сущности из текста и возвращает их по типам.
-    
-    Args:
-        text: Входной текст для анализа
-        
-    Returns:
-        Словарь с типами сущностей и их значениями
     """
-    # Убеждаемся, что справочники загружены
     await ensure_references_loaded()
-    
-    text_lower = text.lower()
+
+    text_lower = _norm(text)
     entities = {
         "brands": [],
-        "categories": [], 
+        "categories": [],
         "channels": [],
         "regions": [],
+        "managers": [],
+        "clients": [],
         "unknown": []
     }
-    
-    # Проверяем бренды
+
+    # Бренды — по границам слов, чтобы "динамика" не совпадала с "мика"
     for brand, entity_type in _REFERENCE_CACHE["brands"].items():
-        if brand in text_lower:
-            entities["brands"].append(brand)
-    
-    # Проверяем категории
+        b = _norm(brand)
+        if _has_word(text_lower, b):
+            entities["brands"].append(b)
+
+    # Категории
     for category, entity_type in _REFERENCE_CACHE["categories"].items():
-        if category in text_lower:
-            entities["categories"].append(category)
-    
-    # Проверяем каналы сбыта
+        c = _norm(category)
+        if _has_word(text_lower, c):
+            entities["categories"].append(c)
+
+    # Каналы
     for channel, entity_type in _REFERENCE_CACHE["channels"].items():
-        if channel in text_lower:
-            entities["channels"].append(channel)
-    
-    # Проверяем регионы
+        ch = _norm(channel)
+        if _has_word(text_lower, ch):
+            entities["channels"].append(ch)
+
+    # Регионы
     for region, entity_type in _REFERENCE_CACHE["regions"].items():
-        if region in text_lower:
-            entities["regions"].append(region)
-    
+        r = _norm(region)
+        if _has_word(text_lower, r):
+            entities["regions"].append(r)
+
+    # Менеджеры (ФИО целиком или части через границы слов)
+    for manager, entity_type in _REFERENCE_CACHE["managers"].items():
+        m = _norm(manager)
+        if _has_word(text_lower, m):
+            entities["managers"].append(m)
+
+    # Клиенты
+    for client, entity_type in _REFERENCE_CACHE["clients"].items():
+        cl = _norm(client)
+        if _has_word(text_lower, cl):
+            entities["clients"].append(cl)
+
     return entities
 
 def get_entity_context(entities: Dict[str, List[str]]) -> str:
@@ -205,6 +264,25 @@ def get_entity_context(entities: Dict[str, List[str]]) -> str:
     
     if entities["regions"]:
         context_parts.append(f"Регионы: {', '.join(entities['regions'])}")
+    if entities["managers"]:
+        context_parts.append(f"Менеджеры: {', '.join(entities['managers'])}")
+    if entities["clients"]:
+        context_parts.append(f"Клиенты: {', '.join(entities['clients'])}")
+
+def analyze_entities(text: str) -> Tuple[Dict[str, List[str]], List[str]]:
+    """Возвращает сущности и список неоднозначных токенов (совпали в нескольких типах)."""
+    import itertools
+    ents = asyncio.get_event_loop().run_until_complete(extract_entities(text)) if asyncio.get_event_loop().is_running() is False else {}
+    if not ents:
+        # fallback sync call
+        # In async contexts, caller should use extract_entities directly
+        return {"brands":[],"categories":[],"channels":[],"regions":[],"managers":[],"clients":[],"unknown":[]}, []
+    token_to_types: Dict[str, Set[str]] = {}
+    for t in ["brands","categories","channels","regions","managers","clients"]:
+        for val in ents.get(t, []):
+            token_to_types.setdefault(val, set()).add(t)
+    ambiguous = [tok for tok, types in token_to_types.items() if len(types) > 1]
+    return ents, ambiguous
     
     if context_parts:
         return " | ".join(context_parts)
