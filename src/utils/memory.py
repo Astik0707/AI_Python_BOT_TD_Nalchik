@@ -4,8 +4,10 @@ from typing import List, Dict
 import json
 import asyncio
 import redis.asyncio as redis
+from src.utils.logger import get_logger
 
 _redis: redis.Redis | None = None
+logger = get_logger("utils.memory")
 
 
 def get_redis() -> redis.Redis:
@@ -49,3 +51,6 @@ async def get_history(chat_id: int, limit: int = 10) -> List[Dict[str, str]]:
 async def clear_history(chat_id: int) -> None:
     r = get_redis()
     await r.delete(_chat_key(chat_id))
+
+
+# Clarify/alias features removed — keeping only chat history APIs

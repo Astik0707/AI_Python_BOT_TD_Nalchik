@@ -72,14 +72,35 @@ async def load_references_from_db():
         """
         clients_result = await fetch_all(clients_query)
 
-        # Загружаем менеджеров
-        managers_query = """
-        SELECT DISTINCT LOWER(full_name) AS manager_name
-        FROM sales_representatives
-        WHERE full_name IS NOT NULL AND full_name != ''
-        ORDER BY manager_name
-        """
-        managers_result = await fetch_all(managers_query)
+        # Загружаем менеджеров из sales_representatives и union c profit.manager
+        managers_result = []
+        try:
+            managers_query = """
+            SELECT DISTINCT LOWER(full_name) AS manager_name
+            FROM sales_representatives
+            WHERE full_name IS NOT NULL AND full_name != ''
+            """
+            managers_result = await fetch_all(managers_query)
+        except Exception:
+            managers_result = []
+        profit_managers_result = []
+        try:
+            profit_mgr_query = """
+            SELECT DISTINCT LOWER(manager) AS manager_name
+            FROM profit
+            WHERE manager IS NOT NULL AND manager != ''
+            """
+            profit_managers_result = await fetch_all(profit_mgr_query)
+        except Exception:
+            profit_managers_result = []
+        # Объединяем и нормализуем
+        manager_names: Set[str] = set()
+        for row in managers_result:
+            if row.get("manager_name"):
+                manager_names.add(row["manager_name"])
+        for row in profit_managers_result:
+            if row.get("manager_name"):
+                manager_names.add(row["manager_name"])
         
         # Обновляем кэш
         _REFERENCE_CACHE["brands"] = {
@@ -105,9 +126,7 @@ async def load_references_from_db():
             row["client_name"]: "client" for row in clients_result
         }
         
-        _REFERENCE_CACHE["managers"] = {
-            row["manager_name"]: "manager" for row in managers_result
-        }
+        _REFERENCE_CACHE["managers"] = {name: "manager" for name in manager_names}
         
         _REFERENCE_CACHE["last_update"] = time.time()
         
@@ -186,6 +205,77 @@ def _has_word(text: str, phrase: str) -> bool:
         return phrase in text
 
 
+# ---------------- Heuristics for Russian token matching (surname endings) ----------------
+
+_ENDINGS = [
+    "ами", "ями", "ями", "ях", "ях", "ами", "ями",
+    "ого", "ему", "ому", "ыми", "ими",
+    "ой", "ом", "ым", "ем",
+    "ев", "ов",  # plural possessive sometimes appears
+    "а", "я", "у", "е", "ы", "и",
+]
+
+
+def _tokenize(text: str) -> List[str]:
+    try:
+        return re.findall(r"[a-zA-Zа-яА-ЯёЁ]+", text or "")
+    except re.error:
+        return (text or "").split()
+
+
+def _stem_simple(token: str) -> str:
+    t = _norm(token)
+    for suf in _ENDINGS:
+        if t.endswith(suf) and len(t) > len(suf) + 2:
+            return t[: -len(suf)]
+    return t
+
+
+def _tokens_match_approx(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    aa = _stem_simple(a)
+    bb = _stem_simple(b)
+    if aa == bb:
+        return True
+    # Allow contains when short (>=4 chars) after stemming
+    if len(aa) >= 4 and (aa in bb or bb in aa):
+        return True
+    return False
+
+
+def resolve_manager_name_from_text(text: str) -> Optional[str]:
+    """Attempt to resolve a manager full name from free text using cached managers.
+    Returns lower-cased full name if uniquely resolved, else None.
+    """
+    text_tokens = _tokenize(text or "")
+    stems = [_stem_simple(t) for t in text_tokens]
+    if not stems:
+        return None
+    candidates: List[str] = []
+    for name in _REFERENCE_CACHE.get("managers", {}).keys():
+        parts = [p for p in (name or "").split() if p]
+        if not parts:
+            continue
+        surname = parts[0]
+        if any(_tokens_match_approx(surname, st) for st in stems):
+            candidates.append(name)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    # Try to disambiguate by first name token
+    filtered: List[str] = []
+    for cand in candidates:
+        parts = [p for p in cand.split() if p]
+        first = parts[1] if len(parts) >= 2 else ""
+        if first and any(_tokens_match_approx(first, st) for st in stems):
+            filtered.append(cand)
+    if len(filtered) == 1:
+        return filtered[0]
+    return None
+
+
 async def extract_entities(text: str) -> Dict[str, List[str]]:
     """
     Извлекает сущности из текста и возвращает их по типам.
@@ -227,11 +317,21 @@ async def extract_entities(text: str) -> Dict[str, List[str]]:
         if _has_word(text_lower, r):
             entities["regions"].append(r)
 
-    # Менеджеры (ФИО целиком или части через границы слов)
+    # Менеджеры (ФИО целиком или части через границы слов) + грубая нормализация падежей
+    tokens = _tokenize(text)
+    stems = [_stem_simple(t) for t in tokens]
     for manager, entity_type in _REFERENCE_CACHE["managers"].items():
         m = _norm(manager)
+        # прямое точное совпадение слова
         if _has_word(text_lower, m):
             entities["managers"].append(m)
+            continue
+        # по фамилии/части с учётом стемминга
+        parts = [p for p in re.split(r"\s+", m) if p]
+        if parts:
+            surname = parts[0]
+            if any(_tokens_match_approx(surname, st) for st in stems):
+                entities["managers"].append(m)
 
     # Клиенты
     for client, entity_type in _REFERENCE_CACHE["clients"].items():
@@ -268,6 +368,11 @@ def get_entity_context(entities: Dict[str, List[str]]) -> str:
         context_parts.append(f"Менеджеры: {', '.join(entities['managers'])}")
     if entities["clients"]:
         context_parts.append(f"Клиенты: {', '.join(entities['clients'])}")
+
+    # Возвращаем итоговую строку контекста
+    if context_parts:
+        return " | ".join(context_parts)
+    return ""
 
 def analyze_entities(text: str) -> Tuple[Dict[str, List[str]], List[str]]:
     """Возвращает сущности и список неоднозначных токенов (совпали в нескольких типах)."""

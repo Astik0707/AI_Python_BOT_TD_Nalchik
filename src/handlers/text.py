@@ -14,6 +14,7 @@ from src.utils.memory import append_message, clear_history
 from src.utils.debug import tg_debug, is_debug
 from typing import List, Dict
 import re
+ 
 
 logger = get_logger("handlers.text")
 
@@ -45,6 +46,8 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if is_waiting_for_comment(chat_id):
             await handle_comment_text(update, context)
             return
+
+        result = None
 
         # Сброс контекста по ключевой фразе
         if "новый запрос" in text.lower():
@@ -98,13 +101,14 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await tg_debug(context, chat_id, f"⚠️ Ошибка памяти: {e}")
 
         # 2) AI agent -> returns json contract
-        await tg_debug(context, chat_id, "🤖 Запрос к AI...")
-        result = await run_ai_for_text(
-            chat_id=chat_id, 
-            user_id=user.id if user else None, 
-            user_name=user.full_name if user else None, 
-            text=text
-        )
+        if result is None:
+            await tg_debug(context, chat_id, "🤖 Запрос к AI...")
+            result = await run_ai_for_text(
+                chat_id=chat_id, 
+                user_id=user.id if user else None, 
+                user_name=user.full_name if user else None, 
+                text=text
+            )
         await tg_debug(context, chat_id, f"✅ AI ответ получен. send_excel={result.send_excel}, send_card={result.send_card}")
 
         # Если включён debug — показываем SQL и первые строки
@@ -117,6 +121,8 @@ async def process_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     await tg_debug(context, chat_id, f"<code>rows:</code> {sanitize_html(str(sample))}")
         except Exception:
             pass
+
+        # Без кода доуточнений: всё решает промпт агента
 
         # 3) Санитизация HTML
         html = sanitize_html(result.output)

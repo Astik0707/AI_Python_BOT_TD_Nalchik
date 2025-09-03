@@ -17,7 +17,7 @@ from src.handlers.training_feedback import handle_training_feedback, handle_comm
 from src.utils.logger import setup_logging, get_logger
 from src.db.pool import close_pool
 from src.utils.debug import set_debug, is_debug
-from src.utils.reference_data import ensure_references_loaded, force_refresh_references, get_references_stats
+ 
 
 load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=True)
 
@@ -81,29 +81,6 @@ async def debug_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=chat_id, text="✅ Режим отладки выключен")
 
 
-async def refresh_refs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Принудительно обновляет справочники из БД."""
-    chat_id = update.effective_chat.id
-    try:
-        await force_refresh_references()
-        stats = get_references_stats()
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text=f"🔄 Справочники обновлены!\n\n"
-                 f"📊 Статистика:\n"
-                 f"• Бренды: {stats['brands_count']}\n"
-                 f"• Категории: {stats['categories_count']}\n"
-                 f"• Каналы: {stats['channels_count']}\n"
-                 f"• Регионы: {stats['regions_count']}\n"
-                 f"• Последнее обновление: {datetime.fromtimestamp(stats['last_update']).strftime('%d.%m.%Y %H:%M:%S') if stats['last_update'] else 'Неизвестно'}"
-        )
-    except Exception as e:
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text=f"❌ Ошибка обновления справочников: {e}"
-        )
-
-
 async def show_cards_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Показывает меню с карточками торговых представителей."""
     chat_id = update.effective_chat.id
@@ -118,26 +95,7 @@ async def show_cards_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
 
-async def refs_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Показывает статистику справочников."""
-    chat_id = update.effective_chat.id
-    try:
-        stats = get_references_stats()
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text=f"📊 Статистика справочников:\n\n"
-                 f"• Бренды: {stats['brands_count']}\n"
-                 f"• Категории: {stats['categories_count']}\n"
-                 f"• Каналы: {stats['channels_count']}\n"
-                 f"• Регионы: {stats['regions_count']}\n"
-                 f"• Последнее обновление: {datetime.fromtimestamp(stats['last_update']).strftime('%d.%m.%Y %H:%M:%S') if stats['last_update'] else 'Неизвестно'}\n"
-                 f"• Кэш истёк: {'Да' if stats['cache_expired'] else 'Нет'}"
-        )
-    except Exception as e:
-        await context.bot.send_message(
-            chat_id=chat_id, 
-            text=f"❌ Ошибка получения статистики: {e}"
-        )
+ 
 
 
 def main() -> None:
@@ -156,8 +114,7 @@ def main() -> None:
         app.add_handler(CommandHandler("start", start_command))
         app.add_handler(CommandHandler("debug_on", debug_on))
         app.add_handler(CommandHandler("debug_off", debug_off))
-        app.add_handler(CommandHandler("refresh_refs", refresh_refs))
-        app.add_handler(CommandHandler("refs_stats", refs_stats))
+        
         app.add_handler(CommandHandler("cards", show_cards_command))
         app.add_handler(CallbackQueryHandler(handle_card_callback, pattern="^card_"))
         app.add_handler(CallbackQueryHandler(handle_training_feedback, pattern="^training_"))
