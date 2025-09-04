@@ -19,8 +19,10 @@ from .renderer import render_rows, render_no_data, render_text_info
 logger = get_logger("ai.agent")
 
 
-async def run_ai_for_text(chat_id: int, text: str) -> AgentResult:
-    """Тонкий оркестратор: LLM -> (sql_query) -> DB -> красивый HTML."""
+async def run_ai_for_text(chat_id: int, text: str, user_id: Optional[int] = None, **kwargs) -> AgentResult:
+    """Тонкий оркестратор: LLM -> (sql_query) -> DB -> красивый HTML.
+    user_id оставлен для обратной совместимости с обработчиками, не используется.
+    """
     if not text or not text.strip():
         return AgentResult(output="Пожалуйста, введите текст для обработки.")
 
