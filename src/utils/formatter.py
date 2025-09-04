@@ -1,172 +1,222 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-import datetime
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+import datetime as _dt
 import os
 from decimal import Decimal
 import re
 
+# ВАЖНО: используем корректный модуль sanitize_html
+from src.utils.html_sanitize import sanitize_html
+
+
+# =========================
+# ЧИСЛА И ЕДИНИЦЫ
+# =========================
+
+def _to_float(value: Any) -> Optional[float]:
+    """Безопасно приводит значение к float. Поддерживает int/float/Decimal/str с пробелами и запятыми.
+    Возвращает None, если не похоже на число.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float):
+        return value
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, Decimal):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    try:
+        s = str(value).strip().replace("\u00A0", " ")
+        s = s.replace(" ", "").replace(",", ".")
+        return float(s)
+    except Exception:
+        return None
+
 
 def format_number_ru(value: Any) -> str:
-    """Format number with space thousands and comma decimal according to ТЗ.
-    Accepts int/float/Decimal/str that looks like number.
-    """
-    try:
-        if isinstance(value, Decimal):
-            num = float(value)
-        elif isinstance(value, (int, float)):
-            num = float(value)
-        else:
-            num = float(str(value).replace(" ", "").replace(",", "."))
-        whole, frac = f"{num:.2f}".split(".")
-        groups: List[str] = []
-        for i in range(len(whole), 0, -3):
-            start = max(i - 3, 0)
-            groups.append(whole[start:i])
-        whole_spaced = " ".join(reversed(groups))
-        return f"{whole_spaced},{frac}"
-    except Exception:
+    """Формат: 12 345,67; для целых — 12 345 (без ,00). Если не число — исходная строка."""
+    num = _to_float(value)
+    if num is None:
         return str(value)
+
+    whole, frac = f"{num:.2f}".split(".")
+    groups: List[str] = []
+    for i in range(len(whole), 0, -3):
+        start = max(i - 3, 0)
+        groups.append(whole[start:i])
+    whole_spaced = " ".join(reversed(groups))
+    return whole_spaced if frac == "00" else f"{whole_spaced},{frac}"
 
 
 def with_unit(value: Any, unit: str) -> str:
+    """Форматирует число + добавляет единицу, если она задана."""
     formatted = format_number_ru(value)
     return f"{formatted}{unit}" if unit else formatted
 
 
-def detect_primary_fields(row: Dict[str, Any]) -> tuple[str, Optional[str]]:
-    """Heuristically detect display name field and primary numeric field.
-    Returns (name_key, value_key or None).
+def unit_for_key(value_key_lower: Optional[str]) -> str:
+    """Определяет единицу измерения по названию ключа."""
+    if not value_key_lower:
+        return ""
+    k = value_key_lower
+
+    # Деньги
+    if ("revenue" in k) or ("sum" in k) or ("amount" in k) or ("руб" in k) or ("₽" in k) or ("выручк" in k) or ("return" in k):
+        return " ₽"
+
+    # Вес
+    if ("weight" in k) or ("kg" in k) or ("вес" in k) or ("кг" in k):
+        return " кг"
+
+    # Количество
+    if ("quantity" in k) or ("qty" in k) or ("колич" in k) or ("шт" in k):
+        return " шт"
+
+    return ""
+
+
+# =========================
+# ЭТИКЕТКИ ДЛЯ МЕТРИК
+# =========================
+
+def _label_for_metric(key_lower: str) -> str:
+    if ("выручк" in key_lower) or ("revenue" in key_lower) or ("руб" in key_lower) or ("₽" in key_lower) or ("sum" in key_lower) or ("amount" in key_lower):
+        return "Выручка"
+    if ("возврат" in key_lower) or ("returns" in key_lower) or ("return" in key_lower):
+        return "Возвраты"
+    if ("weight" in key_lower) or ("вес" in key_lower) or ("kg" in key_lower) or ("кг" in key_lower):
+        return "Вес"
+    if ("quantity" in key_lower) or ("qty" in key_lower) or ("колич" in key_lower) or ("шт" in key_lower):
+        return "Количество"
+    return key_lower
+
+
+# =========================
+# ПОМОЩНИКИ ДЛЯ ДАННЫХ
+# =========================
+
+def _looks_numeric(val: Any) -> bool:
+    return _to_float(val) is not None
+
+
+def _parse_dt(val: Any) -> Optional[_dt.date]:
+    """Пытается разобрать дату (date/datetime/ISO/ YYYY-MM → 1-е число)."""
+    if val is None:
+        return None
+    if isinstance(val, _dt.datetime):
+        return val.date()
+    if isinstance(val, _dt.date):
+        return val
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}$", s):  # YYYY-MM
+            s = s + "-01"
+        s = s.replace("Z", "+00:00")
+        return _dt.datetime.fromisoformat(s).date()
+    except Exception:
+        return None
+
+
+def _ru_month_name(dt: _dt.date) -> str:
+    months = [
+        "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+    ]
+    return months[dt.month - 1]
+
+
+def _ru_month_from_name(name: str) -> str:
+    m = name.strip().lower()
+    mapping = {
+        "january": "Январь", "february": "Февраль", "march": "Март", "april": "Апрель",
+        "may": "Май", "june": "Июнь", "july": "Июль", "august": "Август",
+        "september": "Сентябрь", "october": "Октябрь", "november": "Ноябрь", "december": "Декабрь",
+    }
+    return mapping.get(m, name)
+
+
+def detect_primary_fields(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    """Эвристически находит поле-название и первое «главное» числовое.
+    Возвращает (name_key, value_key | None).
     """
     if not row:
         return ("", None)
+
     keys = list(row.keys())
     name_key = keys[0]
     value_key: Optional[str] = None
-    # Try to choose obvious numeric columns
-    priority = [
-        "revenue", "sum", "amount", "weight", "weight_kg", "qty", "quantity",
-    ]
+
+    priority = ["revenue", "sum", "amount", "weight", "weight_kg", "qty", "quantity"]
     lower_map = {k.lower(): k for k in keys}
+
     for p in priority:
         if p in lower_map:
             value_key = lower_map[p]
             break
+
     if value_key is None:
         for k, v in row.items():
-            if isinstance(v, (int, float, Decimal)):
+            if _looks_numeric(v):
                 value_key = k
                 break
     return (name_key, value_key)
 
 
-def unit_for_key(value_key_lower: Optional[str]) -> str:
-    if not value_key_lower:
-        return ""
-    # Currency
-    if ("revenue" in value_key_lower) or ("sum" in value_key_lower) or ("amount" in value_key_lower) or ("return" in value_key_lower):
-        return " ₽"
-    if ("выручк" in value_key_lower) or ("руб" in value_key_lower) or ("₽" in value_key_lower):
-        return " ₽"
-    # Weight
-    if ("weight" in value_key_lower) or ("kg" in value_key_lower):
-        return " кг"
-    if ("вес" in value_key_lower) or ("кг" in value_key_lower):
-        return " кг"
-    # Quantity
-    if ("quantity" in value_key_lower) or ("qty" in value_key_lower):
-        return " шт"
-    if ("шт" in value_key_lower):
-        return " шт"
-    return ""
+# =========================
+# HTML СБОРКА
+# =========================
 
-
-def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[str] = None) -> str:
-    """Build strict HTML per §6: title in <b>..</b>, list lines with units.
-    Supports multiple numeric metrics per row and labels them.
+def _extract_title_and_period(existing_title: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Если existing_title уже с <b>…</b> и содержит 'Период:', разделяем.
+    Иначе возвращаем <b>Отчёт</b> и None.
     """
-    if not rows:
-        return "<b>Нет данных по заданным условиям.</b>"
+    if not existing_title:
+        return "<b>Отчёт</b>", None
 
-    # Prepare title and optional period line
-    period_line: Optional[str] = None
-    if existing_title and existing_title.strip().startswith("<b>") and existing_title.strip().endswith("</b>"):
-        # Extract inner text to separate accidental embedded period
-        inner = existing_title.strip()[3:-4].strip()
+    t = existing_title.strip()
+    if t.startswith("<b>") and t.endswith("</b>"):
+        inner = t[3:-4].strip()
         if "Период:" in inner:
             before, after = inner.split("Период:", 1)
             title = f"<b>{before.strip()}</b>"
             period_line = f"Период: {after.strip()}"
-        else:
-            title = existing_title.strip()
-    else:
-        title = "<b>Отчёт</b>"
+            return title, period_line
+        return t, None
 
-    def _looks_numeric(val: Any) -> bool:
-        if isinstance(val, (int, float, Decimal)):
-            return True
-        try:
-            s = str(val).strip().replace("\u00A0", " ")
-            s = s.replace(" ", "").replace(",", ".")
-            float(s)
-            return True
-        except Exception:
-            return False
+    return "<b>Отчёт</b>", None
 
-    # Special case: time series by month/day with multiple metrics
-    def _parse_dt(val: Any) -> Optional[datetime.date]:
-        try:
-            if isinstance(val, datetime.datetime):
-                return val.date()
-            if isinstance(val, datetime.date):
-                return val
-            s = str(val).strip()
-            # Handle YYYY-MM by assuming day = 01
-            if len(s) == 7 and s[4] == '-' and s[:4].isdigit() and s[5:7].isdigit():
-                s = s + "-01"
-            # Try ISO
-            return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).date()
-        except Exception:
-            return None
 
-    def _ru_month_name(dt: datetime.date) -> str:
-        months = [
-            "Январь","Февраль","Март","Апрель","Май","Июнь",
-            "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"
-        ]
-        return months[dt.month - 1]
+def build_html_from_rows(
+    rows: List[Dict[str, Any]],
+    existing_title: Optional[str] = None
+) -> str:
+    """Собирает аккуратный HTML:
+      - Первая строка — <b>Заголовок</b>
+      - Опционально строка «Период: …»
+      - Далее строки вида: <b>Категория</b> — Метрика: 12 345 ₽; Метрика2: 10 шт
+      - Поддерживает time-series (месяцы/даты), weekN_* поля и двухуровневые группировки.
+      - На выходе: СРАЗУ санитизированный HTML (под Telegram), обрезанный по лимиту.
+    """
+    if not rows:
+        return "<b>Нет данных по заданным условиям.</b>"
 
-    def _ru_month_from_name(name: str) -> str:
-        m = name.strip().lower()
-        mapping = {
-            "january": "Январь", "february": "Февраль", "march": "Март", "april": "Апрель",
-            "may": "Май", "june": "Июнь", "july": "Июль", "august": "Август",
-            "september": "Сентябрь", "october": "Октябрь", "november": "Ноябрь", "december": "Декабрь",
-        }
-        return mapping.get(m, name)
+    title, period_line = _extract_title_and_period(existing_title)
 
-    def _label_for_metric(key_lower: str) -> str:
-        if ("выручк" in key_lower) or ("revenue" in key_lower) or ("руб" in key_lower) or ("₽" in key_lower) or ("sum" in key_lower) or ("amount" in key_lower):
-            return "Выручка"
-        if ("возврат" in key_lower) or ("returns" in key_lower) or ("return" in key_lower):
-            return "Возвраты"
-        if ("weight" in key_lower) or ("вес" in key_lower) or ("kg" in key_lower) or ("кг" in key_lower):
-            return "Вес"
-        if ("quantity" in key_lower) or ("qty" in key_lower) or ("колич" in key_lower) or ("шт" in key_lower):
-            return "Количество"
-        return key_lower
-
+    # === time-series (помесячно/по датам)
     probe_keys = set(rows[0].keys())
-    # Heuristic: treat as time-series if there is any date-like or month-like key
     time_keys = [k for k in probe_keys if k in ("month_start", "month", "month_period", "date", "дата", "месяц")]
     if time_keys:
-        # Build label per row
         lines_ts: List[str] = []
         for r in rows:
-            label: Optional[str] = None
-            # Prefer explicit date fields
+            # label
             dt = _parse_dt(r.get("month_start") or r.get("month_period") or r.get("date") or r.get("дата"))
             if dt:
-                label = _ru_month_name(dt) if (isinstance(dt, datetime.date) and dt.day == 1) else dt.isoformat()
+                label = _ru_month_name(dt) if dt.day == 1 else dt.isoformat()
             elif r.get("month"):
                 label = _ru_month_from_name(str(r.get("month")))
             elif r.get("месяц"):
@@ -174,7 +224,7 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
             else:
                 label = str(r.get(time_keys[0]))
 
-            # Collect metrics present in this row
+            # metrics
             parts: List[str] = []
             for k, v in r.items():
                 if k in ("month_start", "month", "month_period", "date", "дата", "месяц"):
@@ -183,56 +233,38 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
                     unit = unit_for_key(k.lower())
                     label_metric = _label_for_metric(k.lower())
                     parts.append(f"{label_metric}: {with_unit(v, unit)}")
+
             if parts:
                 lines_ts.append(f"{label} — {'; '.join(parts)}")
-        if lines_ts:
-            header_block = title + ("\n" + period_line if period_line else "")
-            return header_block + "\n\n" + "\n".join(lines_ts)
 
-    # Determine dimension and numeric metrics
+        if lines_ts:
+            # Сначала санитизируем заголовок/период и каждую строку, затем собираем.
+            head = sanitize_html(title) + (("\n" + sanitize_html(period_line)) if period_line else "")
+            sanitized_lines = [sanitize_html(ln) for ln in lines_ts]
+            return _assemble_with_limit(head, sanitized_lines)
+
+    # === определяем числовые и нечисловые поля
     probe = rows[0]
     non_numeric_keys: List[str] = []
     numeric_keys: List[str] = []
     for k, v in probe.items():
-        if _looks_numeric(v):
-            numeric_keys.append(k)
-        else:
-            non_numeric_keys.append(k)
+        (numeric_keys if _looks_numeric(v) else non_numeric_keys).append(k)
 
-    # Special case: single row with single numeric metric -> return compact summary (optionally with period)
+    # === один ряд, одна метрика → краткий вывод
     if (len(rows) == 1) and (len(numeric_keys) == 1):
         only_key = numeric_keys[0]
         unit = unit_for_key(only_key.lower())
         value = rows[0].get(only_key)
-        formatted = with_unit(value, unit)
-        period_line = None
-        if "period" in probe and isinstance(probe.get("period"), str) and probe.get("period").strip():
-            period_line = f"Период: {probe.get('period').strip()}"
-        parts: List[str] = []
-        if title:
-            parts.append(title)
-        else:
-            parts.append("<b>Отчёт</b>")
+        parts: List[str] = [sanitize_html(title)]
         if period_line:
-            parts.append(period_line)
-        parts.append(formatted)
+            parts.append(sanitize_html(period_line))
+        parts.append(sanitize_html(with_unit(value, unit)))
+        # Здесь нет длинных списков → просто вернуть склеенный текст
         return "\n".join(parts)
 
-    name_key = non_numeric_keys[0] if non_numeric_keys else list(probe.keys())[0]
-    secondary_key: Optional[str] = non_numeric_keys[1] if len(non_numeric_keys) > 1 else None
-
-    # Prefer per-dimension metric if present (e.g., category_revenue vs total_revenue)
-    preferred_metrics: List[str] = []
-    for k in numeric_keys:
-        lk = k.lower()
-        if "total" in lk:
-            continue
-        preferred_metrics.append(k)
-    metrics: List[str] = (preferred_metrics or numeric_keys)[:3]  # display up to 3 metrics
-
-    # Special case: weekly trend columns like week1_kg, week2_qty, week3_revenue
+    # === weekN_* (например: week1_kg, week2_qty, week3_revenue)
     week_pattern = re.compile(r"^week(\d+)_(kg|quantity|qty|revenue)$", re.IGNORECASE)
-    week_metrics: List[tuple[int, str, str]] = []  # (week_number, key, suffix)
+    week_metrics: List[Tuple[int, str, str]] = []
     for k in numeric_keys:
         m = week_pattern.match(k)
         if m:
@@ -240,6 +272,7 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
     if week_metrics:
         week_metrics.sort(key=lambda t: t[0])
         unit_map = {"kg": " кг", "quantity": " шт", "qty": " шт", "revenue": " ₽"}
+        name_key = non_numeric_keys[0] if non_numeric_keys else list(probe.keys())[0]
         lines: List[str] = []
         for r in rows:
             primary_name = str(r.get(name_key, "")).strip()
@@ -254,18 +287,21 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
                 parts.append(f"Неделя {week_num}: {with_unit(val, unit)}")
             if parts:
                 lines.append(f"<b>{primary_name}</b> — {'; '.join(parts)}")
-        header_block = title + ("\n" + period_line if period_line else "")
-        return header_block + "\n\n" + "\n".join(lines)
 
-    # Special case: weekly trend columns like week1, week2, week3 (assume revenue by default)
+        head = sanitize_html(title) + (("\n" + sanitize_html(period_line)) if period_line else "")
+        sanitized_lines = [sanitize_html(ln) for ln in lines]
+        return _assemble_with_limit(head, sanitized_lines)
+
+    # === weekN (без суффиксов: считаем ₽ по умолчанию)
     week_simple_pattern = re.compile(r"^week(\d+)$", re.IGNORECASE)
-    week_simple: List[tuple[int, str]] = []
+    week_simple: List[Tuple[int, str]] = []
     for k in numeric_keys:
         m = week_simple_pattern.match(k)
         if m:
             week_simple.append((int(m.group(1)), k))
     if week_simple:
         week_simple.sort(key=lambda t: t[0])
+        name_key = non_numeric_keys[0] if non_numeric_keys else list(probe.keys())[0]
         lines: List[str] = []
         for r in rows:
             primary_name = str(r.get(name_key, "")).strip()
@@ -279,43 +315,45 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
                 parts.append(f"Неделя {week_num}: {with_unit(val, ' ₽')}")
             if parts:
                 lines.append(f"<b>{primary_name}</b> — {'; '.join(parts)}")
-        header_block = title + ("\n" + period_line if period_line else "")
-        return header_block + "\n\n" + "\n".join(lines)
+
+        head = sanitize_html(title) + (("\n" + sanitize_html(period_line)) if period_line else "")
+        sanitized_lines = [sanitize_html(ln) for ln in lines]
+        return _assemble_with_limit(head, sanitized_lines)
+
+    # === общий случай: одна или две размерности + до 3 метрик
+    name_key = non_numeric_keys[0] if non_numeric_keys else list(probe.keys())[0]
+    secondary_key: Optional[str] = non_numeric_keys[1] if len(non_numeric_keys) > 1 else None
+
+    preferred_metrics: List[str] = [k for k in numeric_keys if "total" not in k.lower()]
+    metrics: List[str] = (preferred_metrics or numeric_keys)[:3]
 
     lines: List[str] = []
-    # If two dimensions present, render grouped: "Primary:\nSecondary - metric"
+
     if secondary_key and metrics:
         first_metric = metrics[0]
-        # Group rows by primary dimension
+
+        # группируем по первичному ключу
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for r in rows:
             primary_name = str(r.get(name_key, "")).strip()
             groups.setdefault(primary_name, []).append(r)
-        # Order groups by sum of first metric desc
+
+        # сортируем группы по сумме первой метрики
         def _sum_metric(lst: List[Dict[str, Any]]) -> float:
             total = 0.0
             for rr in lst:
-                v = rr.get(first_metric)
-                try:
-                    if isinstance(v, (int, float, Decimal)):
-                        total += float(v)
-                    else:
-                        s = str(v).strip().replace(" ", "").replace(",", ".")
-                        total += float(s)
-                except Exception:
-                    continue
+                v = _to_float(rr.get(first_metric))
+                total += v or 0.0
             return total
+
         for primary_name, group_rows in sorted(groups.items(), key=lambda kv: _sum_metric(kv[1]), reverse=True):
             if not primary_name:
                 continue
             lines.append(f"<b>{primary_name}:</b>")
-            # Order inner by metric desc
+
             def _metric_val(rr: Dict[str, Any]) -> float:
-                v = rr.get(first_metric)
-                try:
-                    return float(v) if isinstance(v, (int, float, Decimal)) else float(str(v).replace(" ", "").replace(",", "."))
-                except Exception:
-                    return 0.0
+                return _to_float(rr.get(first_metric)) or 0.0
+
             for rr in sorted(group_rows, key=_metric_val, reverse=True):
                 sec = str(rr.get(secondary_key, "")).strip()
                 if not sec:
@@ -332,8 +370,10 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
                 name = primary_name
             if not name:
                 continue
+
             parts: List[str] = []
             if not metrics:
+                # возьмём первый числовой
                 for k, v in r.items():
                     if _looks_numeric(v):
                         parts.append(with_unit(v, unit_for_key(k.lower())))
@@ -341,59 +381,62 @@ def build_html_from_rows(rows: List[Dict[str, Any]], existing_title: Optional[st
             else:
                 if len(metrics) == 1:
                     k = metrics[0]
-                    if k in r and isinstance(r[k], (int, float, Decimal)):
+                    if k in r and _looks_numeric(r[k]):
                         unit = unit_for_key(k.lower())
                         parts.append(with_unit(r[k], unit))
                 else:
                     for k in metrics:
-                        if k in r and isinstance(r[k], (int, float, Decimal)):
+                        if k in r and _looks_numeric(r[k]):
                             unit = unit_for_key(k.lower())
-                            lk = k.lower()
-                            if ("выручк" in lk) or ("revenue" in lk) or ("руб" in lk) or ("₽" in lk) or ("sum" in lk) or ("amount" in lk):
-                                label = "Выручка"
-                            elif ("возврат" in lk) or ("returns" in lk) or ("return" in lk):
-                                label = "Возвраты"
-                            elif ("weight" in lk) or ("вес" in lk) or ("kg" in lk) or ("кг" in lk):
-                                label = "Вес"
-                            elif ("quantity" in lk) or ("qty" in lk) or ("колич" in lk) or ("шт" in lk):
-                                label = "Количество"
-                            else:
-                                label = k.replace("₽", "").strip()
+                            label = _label_for_metric(k.lower())
                             parts.append(f"{label}: {with_unit(r[k], unit)}")
+
             bold_name = f"<b>{name}</b>"
             line = bold_name if not parts else f"{bold_name} — {'; '.join(parts)}"
             lines.append(line)
 
-    header_block = title + ("\n" + period_line if period_line else "")
+    head = sanitize_html(title) + (("\n" + sanitize_html(period_line)) if period_line else "")
+    sanitized_lines = [sanitize_html(ln) for ln in lines]
+    return _assemble_with_limit(head, sanitized_lines)
 
-    # Respect Telegram ~4096 chars limit. Leave room for footer.
+
+# =========================
+# СБОРКА С УЧЁТОМ ЛИМИТА TELEGRAM
+# =========================
+
+def _assemble_with_limit(header_block: str, sanitized_lines: List[str]) -> str:
+    """Собирает итог: header + пустая строка + список строк, при необходимости обрезает,
+    не ломая HTML (строки уже санитизированы и самодостаточны).
+    """
+    # Лимит Telegram
     try:
-        max_len_env = int(os.getenv("TELEGRAM_MAX_MESSAGE", "4000"))
+        hard_limit = int(os.getenv("TELEGRAM_MAX_MESSAGE", "4000"))
     except Exception:
-        max_len_env = 4000
-    safety_tail = 200  # reserve for footer if truncated
-    hard_limit = max(500, max_len_env)
+        hard_limit = 4000
+    hard_limit = max(500, hard_limit)
+    safety_tail = 200  # на футер
 
-    full_body = "\n".join(lines) if lines else ""
-    full_text = header_block + "\n\n" + full_body
+    header_block = sanitize_html(header_block)
+    full_text = header_block + "\n\n" + "\n".join(sanitized_lines)
     if len(full_text) <= hard_limit:
         return full_text
 
-    # Trim lines to fit into the limit and add footer
     kept: List[str] = []
     current_len = len(header_block) + 2
     limit_for_lines = hard_limit - safety_tail
-    for ln in lines:
-        next_len = current_len + len(ln) + 1
-        if next_len > limit_for_lines:
+
+    for ln in sanitized_lines:
+        add_len = len(ln) + 1
+        if current_len + add_len > limit_for_lines:
             break
         kept.append(ln)
-        current_len = next_len
+        current_len += add_len
 
     shown = len(kept)
-    total = len(lines)
-    footer = f"\n\nПоказаны первые {shown} из {total} строк. Могу отправить полный список в Excel — напишите: в excel"
-    return header_block + "\n\n" + ("\n".join(kept)) + footer
-
-
-
+    total = len(sanitized_lines)
+    footer = (
+        f"\n\nПоказаны первые {shown} из {total} строк. "
+        f"Могу отправить полный список в Excel — напишите: в excel"
+    )
+    # Футер тоже санитизируем (на будущее, если появятся ссылки/теги)
+    return header_block + "\n\n" + ("\n".join(kept)) + sanitize_html(footer)
