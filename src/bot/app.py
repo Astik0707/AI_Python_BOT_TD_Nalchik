@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+    Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 )
 
 from src.utils.html_sanitize import sanitize_html
