@@ -1,0 +1,33 @@
+2025-09-04 12:08:38 [ERROR] bot: Critical error in main: TELEGRAM_BOT_TOKEN is not set
+2025-09-04 12:09:50 [ERROR] bot: Critical error in main: TELEGRAM_BOT_TOKEN is not set
+2025-09-04 14:38:16 [ERROR] bot: Critical error in main: The token `7479910368:AAGe7N8du7hf52xmNgiGkqm0f-cYMPVAsdA` was rejected by the server.
+2025-09-04 14:41:55 [ERROR] bot: Critical error in main: The token `7479910368:AAGe7N8du7hf52xmNgiGkqm0f-cYMPVAsdA` was rejected by the server.
+2025-09-04 14:46:02 [ERROR] bot: Critical error in main: The token `7479910368:AAHKPP-ZI_UX6ALdtSCJz1e316Od7-qKQT8` was rejected by the server.
+2025-09-04 14:47:22 [ERROR] bot: Critical error in main: The token `7479910368:AAHKPP-ZI_UX6ALdtSCJz1e316Od7-qKQT8` was rejected by the server.
+2025-09-04 14:48:38 [ERROR] ai.agent: AI second-pass formatting error: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 14:58:54 [ERROR] ai.agent: AI second-pass formatting error: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 15:00:51 [ERROR] ai.agent: AI second-pass formatting error: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 15:09:14 [ERROR] ai.agent: ❌ AI_SECOND_PASS_ERROR: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 15:26:55 [ERROR] handlers.text: Error processing text message: name 'render_text_info' is not defined
+Traceback (most recent call last):
+  File "/home/adminvm/Test_Bot_n8n/src/handlers/text.py", line 102, in process_text
+    result = await run_ai_for_text(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adminvm/Test_Bot_n8n/src/ai/agent.py", line 614, in run_ai_for_text
+    res = render_text_info(output)
+          ^^^^^^^^^^^^^^^^
+NameError: name 'render_text_info' is not defined
+2025-09-04 15:32:19 [ERROR] handlers.text: Error processing text message: name '_remember' is not defined
+Traceback (most recent call last):
+  File "/home/adminvm/Test_Bot_n8n/src/handlers/text.py", line 102, in process_text
+    result = await run_ai_for_text(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adminvm/Test_Bot_n8n/src/ai/agent.py", line 631, in run_ai_for_text
+    await _remember(chat_id, text, res.output)
+          ^^^^^^^^^
+NameError: name '_remember' is not defined
+2025-09-04 15:56:48 [ERROR] ai.agent: ❌ ОШИБКА_ВТОРОГО_ПРОХОДА_ИИ: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 15:57:12 [ERROR] ai.agent: ❌ ОШИБКА_ВТОРОГО_ПРОХОДА_ИИ: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 16:00:31 [ERROR] ai.agent: ❌ ОШИБКА_ВТОРОГО_ПРОХОДА_ИИ: Error code: 400 - {'error': {'message': "'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'.", 'type': 'invalid_request_error', 'param': 'messages', 'code': None}}
+2025-09-04 16:05:22 [ERROR] sql: ❌ SQL QUERY FAILED: Only SELECT or WITH (CTE) statements are allowed
+2025-09-04 16:05:22 [ERROR] sql: ❌ FAILED QUERY: Нет SQL-запроса, так как вопрос не требует данных из базы.
